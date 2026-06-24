@@ -101,5 +101,36 @@ describe("image processing", () => {
       const dims = await getImageDimensions(filePath);
       expect(dims).toEqual({ width: 100, height: 100 });
     });
+
+    it("handles scale > 1 by padding with transparency (container is larger than image)", async () => {
+      const filePath = await createTemp("test-pad-100x100.png", 100, 100);
+
+      // Scale height by 2, keep width at 1, no translation
+      const transform: Transform = [
+        [1, 0, 0],
+        [0, 2, 0],
+      ];
+
+      await applyCropTransform(filePath, transform);
+
+      const dims = await getImageDimensions(filePath);
+      // Height should double to 200px
+      expect(dims).toEqual({ width: 100, height: 200 });
+    });
+
+    it("handles offsets and translations correctly", async () => {
+      const filePath = await createTemp("test-offset-200x200.png", 200, 200);
+
+      // Scale down by 0.5, shift right by 0.25
+      const transform: Transform = [
+        [0.5, 0, 0.25],
+        [0, 0.5, 0],
+      ];
+
+      await applyCropTransform(filePath, transform);
+
+      const dims = await getImageDimensions(filePath);
+      expect(dims).toEqual({ width: 100, height: 100 });
+    });
   });
 });

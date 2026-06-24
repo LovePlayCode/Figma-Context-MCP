@@ -21,38 +21,57 @@ export async function applyCropTransform(
 
   try {
     // Extract transform values (skew values intentionally unused for now)
-    const scaleX = cropTransform[0]?.[0] ?? 1;
+    const scaleX = Math.abs(cropTransform[0]?.[0] ?? 1);
     const translateX = cropTransform[0]?.[2] ?? 0;
-    const scaleY = cropTransform[1]?.[1] ?? 1;
+    const scaleY = Math.abs(cropTransform[1]?.[1] ?? 1);
     const translateY = cropTransform[1]?.[2] ?? 0;
 
-    const image = await Jimp.read(imagePath);
-    const { width, height } = image;
-
-    // Calculate crop region based on transform matrix
-    // Figma's transform matrix represents how the image is positioned within its container
-    // We need to extract the visible portion based on the scaling and translation
-
-    // The transform matrix defines the visible area as:
-    // - scaleX/scaleY: how much of the original image is visible (0-1)
-    // - translateX/translateY: offset of the visible area (0-1, relative to image size)
-
-    const cropLeft = Math.max(0, Math.round(translateX * width));
-    const cropTop = Math.max(0, Math.round(translateY * height));
-    const cropWidth = Math.min(width - cropLeft, Math.round(scaleX * width));
-    const cropHeight = Math.min(height - cropTop, Math.round(scaleY * height));
-
-    if (cropWidth <= 0 || cropHeight <= 0) {
-      Logger.log(`Invalid crop dimensions for ${imagePath}, using original image`);
+    if (scaleX <= 0 || scaleY <= 0) {
+      Logger.log(`Invalid scale factors for ${imagePath}, using original image`);
       return imagePath;
     }
 
-    image.crop({ x: cropLeft, y: cropTop, w: cropWidth, h: cropHeight });
-    await image.write(imagePath as `${string}.${string}`);
+    const originalImage = await Jimp.read(imagePath);
+    const { width, height } = originalImage;
 
-    Logger.log(`Cropped image saved (overwritten): ${imagePath}`);
+    // Calculate target dimensions representing the container size
+    const targetWidth = Math.max(1, Math.round(width * scaleX));
+    const targetHeight = Math.max(1, Math.round(height * scaleY));
+
+    // Create a new transparent canvas
+    const canvas = new Jimp({ width: targetWidth, height: targetHeight, color: 0x00000000 });
+
+    // Calculate composition offset for the original image
+    const destX = Math.round(-translateX * width);
+    const destY = Math.round(-translateY * height);
+
+    // Composite original image onto the target canvas by copying buffer rows.
+    // This is equivalent to drawing originalImage at (destX, destY) on the canvas.
+    for (let yImg = 0; yImg < height; yImg++) {
+      const yTarget = destY + yImg;
+      if (yTarget >= 0 && yTarget < targetHeight) {
+        const xTargetStart = Math.max(0, destX);
+        const xTargetEnd = Math.min(targetWidth, destX + width);
+        const L = xTargetEnd - xTargetStart;
+        if (L > 0) {
+          const xImgStart = xTargetStart - destX;
+          const srcOffset = (yImg * width + xImgStart) * 4;
+          const destOffset = (yTarget * targetWidth + xTargetStart) * 4;
+          originalImage.bitmap.data.copy(
+            canvas.bitmap.data,
+            destOffset,
+            srcOffset,
+            srcOffset + L * 4,
+          );
+        }
+      }
+    }
+
+    await canvas.write(imagePath as `${string}.${string}`);
+
+    Logger.log(`Cropped/Padded image saved (overwritten): ${imagePath}`);
     Logger.log(
-      `Crop region: ${cropLeft}, ${cropTop}, ${cropWidth}x${cropHeight} from ${width}x${height}`,
+      `Transform applied: canvas ${targetWidth}x${targetHeight}, offset: ${destX}, ${destY} from ${width}x${height}`,
     );
 
     return imagePath;
